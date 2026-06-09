@@ -1,0 +1,14 @@
+schema_version = "1.0.0"
+
+id = "btopo"
+version = "0.1.0"
+name = "BTopo"
+tagline = "CAD to game-ready hard-surface retopology tools"
+maintainer = "Jordan Moss"
+type = "add-on"
+
+blender_version_min = "4.2.0"
+
+license = ["SPDX:GPL-3.0-or-later"]
+
+tags = ["Mesh", "Modeling", "Pipeline"]

@@ -1,0 +1,194 @@
+# BTopo — Design Document
+
+**CAD → game-ready hard-surface topology, inside Blender.**
+
+## 1. Problem statement
+
+Geometry exported from CAD packages (SolidWorks, Fusion 360, CATIA, STEP/IGES via
+converters) arrives in Blender as tessellated meshes with topology that is hostile
+to game pipelines:
+
+- **Laddered triangulation** — long, thin triangle strips along cylindrical and
+  filleted surfaces.
+- **Triangle fans** radiating from a single vertex on planar faces and caps.
+- **Wildly uneven density** — thousands of triangles on a tiny fillet, two
+  triangles on a large planar face.
+- **No edge flow** — feature edges (the actual design intent) are encoded in
+  split normals and face angles, not in the topology itself.
+- **Degenerate geometry** — duplicate vertices along patch seams, zero-area
+  faces, T-junctions where NURBS patches met.
+
+Game engines need the opposite: controlled polycount, quad-dominant topology with
+flow that follows feature edges, clean shading via sharp edges + weighted normals,
+and UV-able, bake-able surfaces.
+
+Today artists bridge this gap with a grab-bag of generic tools (Limited Dissolve,
+Tris-to-Quads, manual retopo) or organic-focused addons (RetopoFlow) that don't
+understand hard-surface features. **BTopo's thesis: the CAD mesh already contains
+the design intent — feature edges, surface regions, symmetry. Extract it, and use
+it to drive both automated cleanup and fast manual authoring.**
+
+## 2. Target user & scope
+
+- **User:** game environment/prop/vehicle/weapon artists ingesting CAD or
+  CAD-derived meshes; technical artists building ingest pipelines.
+- **In scope:** hard-surface meshes — machined parts, products, vehicles, props.
+- **Out of scope (explicitly):** organic retopo (sculpt → animation topology),
+  CAD import itself (STEP parsing — users bring a tessellated mesh), auto-UV and
+  baking (we *prepare* for them, we don't replace dedicated tools).
+
+## 3. The two workflows
+
+BTopo supports two strategies, which can be mixed per-part:
+
+### A. Repair-in-place (fast, for mid/background assets)
+Keep the CAD tessellation as the base and surgically clean it:
+detect features → weld seams → dissolve coplanar ladders → quadify →
+even out density → finalize shading. Cheap, preserves silhouette exactly,
+good enough for many assets.
+
+### B. Retopo-over (quality, for hero assets)
+The CAD mesh becomes a read-only *reference surface*. The artist authors a new
+mesh on top of it with surface-snapped tools, guided by the extracted feature
+graph. The CAD mesh doubles as the **bake high-poly**, which is a major
+workflow win: source = highpoly, authored mesh = lowpoly, bake normals between
+them.
+
+The addon's UI is organized around a pipeline that serves both:
+
+```
+ANALYZE  →  CLEANUP (in-place)  →  RETOPO (author-over)  →  FINALIZE  →  EXPORT
+```
+
+## 4. Tool inventory
+
+### 4.1 Analyze
+| Tool | Description |
+|---|---|
+| **Detect Features** | Build the *feature graph*: mark edges as sharp where face angle exceeds threshold, plus boundaries and non-manifold edges. Optionally mark as UV seams and bevel weights. This is the foundation every other tool consumes. |
+| **Select Issues** | Select triangles, n-gons, poles (interior valence ≠ 4), or non-manifold geometry for QA passes. |
+| **Topology Report** | Counts: tris/quads/ngons, poles, ladder strips, degenerate faces, islands. Shown in the panel after analysis. |
+| **Heatmap Overlays** *(v0.5)* | GPU-drawn viewport overlays: face density, aspect-ratio (ladder) highlighting, curvature. |
+| **Patch Segmentation** *(v0.5)* | Flood-fill faces bounded by feature edges into named regions (planar / cylindrical / freeform classification). Drives patch-fill and auto-quadify. |
+
+### 4.2 Cleanup (repair-in-place)
+| Tool | Description |
+|---|---|
+| **CAD Cleanup** | One-click pass: weld doubles (CAD patch seams) → limited dissolve *delimited by detected sharp edges* (kills ladders on flat/smooth regions without eating features) → tris-to-quads respecting sharps. Reports before/after counts. |
+| **Collapse Ladders** *(v0.2)* | Targeted: find strips of high-aspect-ratio quads/tris between two feature edges and merge them into single quad spans (un-subdivide along the strip direction). |
+| **Collapse Fans** *(v0.2)* | Detect fan vertices on planar caps; replace fan with grid fill. |
+| **Rebuild Fillets** *(v1.0)* | Detect over-tessellated cylindrical fillet strips; rebuild at a user-set segment count, preserving the tangent rails. |
+| **Density Equalize** *(v1.0)* | Planar-decimate / subdivide per segmented patch to hit a target edge length. |
+
+### 4.3 Retopo (author-over)
+| Tool | Description |
+|---|---|
+| **Start Retopo Session** | One click: creates `<name>_retopo` object, configures face-nearest snapping, adds a Shrinkwrap (above-surface) modifier targeting the source, sets in-front + wire display, makes the source unselectable. Mirror modifier if the source is symmetric. |
+| **Trace Feature Loops** *(v0.2)* | Walk the source's feature graph and generate corresponding edge loops in the retopo mesh — the artist gets the structural "cage" for free, then fills between rails. |
+| **Quad Strip / Bridge Fill** *(v0.2)* | Select two rails, fill with an even quad strip projected to the surface. |
+| **Patch Fill (Coons)** *(v0.5)* | Select a closed boundary of 4 logical sides, fill with a quad grid (transfinite/Coons interpolation), snap to surface. |
+| **Surface Relax** *(v0.5)* | Modal brush: Laplacian relax that re-projects to the reference surface each step, with feature-edge vertices constrained to slide along their feature curve only. |
+| **Draw Strips** *(v1.0)* | Modal tool: draw a stroke on the surface, get a quad strip following it; strokes snap to feature edges magnetically. |
+
+### 4.4 Finalize & Export
+| Tool | Description |
+|---|---|
+| **Finalize Shading** | Shade smooth + sharp edges from feature angle + Weighted Normal modifier (keep-sharp). The standard game hard-surface shading recipe. |
+| **Seams from Features** *(v0.2)* | Copy sharp/feature edges to UV seams (with island-count sanity heuristics). |
+| **Triangulation Preview** *(v0.5)* | Toggle a triangulate modifier matching engine settings (fixed/beauty) so the artist sees what the engine will see. |
+| **Export Presets** *(v0.5)* | FBX/glTF presets: apply modifiers, triangulate, tangents, unit scale, axis per engine (Unreal/Unity/Godot). |
+| **LOD Chain** *(v1.0)* | Generate LODs via feature-aware decimation (features dissolve last), named per engine convention. |
+
+## 5. UX design
+
+- **Location:** 3D Viewport sidebar (N-panel), tab **BTopo**, one collapsible
+  sub-panel per pipeline stage in pipeline order. The panel order *is* the
+  recommended workflow — discoverable for newcomers, fast for repeat use.
+- **Modal tools** (relax, draw strips) register as proper toolbar tools with
+  their own keymaps in later versions; v0.x ships them as operators.
+- **Non-destructive bias:** everything that can be a modifier is a modifier
+  (shrinkwrap, weighted normals, triangulate preview, mirror). Destructive
+  cleanup operators always report counts and respect undo.
+- **Conventions:** feature edges = Blender sharp edges (interoperable with
+  vanilla tools), retopo objects suffixed `_retopo`, source set unselectable
+  during a session rather than hidden (it's the visual reference and bake target).
+
+## 6. Architecture
+
+```
+btopo/
+  blender_manifest.toml   # Blender 4.2+ extension manifest
+  __init__.py             # registration only
+  properties.py           # Scene-level PropertyGroup (tool settings)
+  ops_analyze.py          # feature detection, issue selection
+  ops_cleanup.py          # in-place repair operators
+  ops_retopo.py           # retopo session + authoring tools
+  ops_finalize.py         # shading / export prep
+  panels.py               # UI
+  core/ (future)          # feature_graph.py, ladders.py, patchfill.py, overlay.py
+```
+
+Technical choices:
+
+- **Pure Python / bpy + bmesh.** No compiled dependencies — installability beats
+  raw speed. Hot paths (full-mesh attribute scans) use
+  `foreach_get`/`foreach_set` with NumPy where bmesh iteration is too slow.
+- **Blender 4.2+ extension** (`blender_manifest.toml`); `bl_info` retained for
+  legacy-style installs.
+- **Surface snapping:** Blender's built-in Face-Nearest snapping + Shrinkwrap
+  for interactive editing; `mathutils.bvhtree.BVHTree` for tool-driven
+  projection (patch fill, relax) so results don't depend on viewport state.
+- **Feature graph:** stored as native sharp-edge flags (single source of truth,
+  user-editable with vanilla tools), with a cached Python-side graph
+  (curves = chains of sharp edges between corner vertices) rebuilt on demand
+  for trace/fill tools.
+- **Overlays:** `gpu` module batch drawing in a `draw_handler`, data cached and
+  invalidated on depsgraph updates.
+- **Modal tools:** standard modal-operator pattern; later promoted to
+  `WorkSpaceTool`s with gizmos.
+
+## 7. Key algorithms (sketches)
+
+- **Feature detection:** edge is a feature if dihedral angle > threshold, OR
+  boundary, OR non-manifold. Future refinement: hysteresis (lower threshold to
+  *extend* an already-started feature curve) to survive noisy tessellation on
+  shallow fillets.
+- **Ladder detection:** quad/tri-pair strips where aspect ratio > k and the
+  strip is bounded by parallel feature curves; collapse = merge edge rungs
+  (un-subdivide along strip axis).
+- **Patch fill:** boundary loop → split into 4 logical sides at corner vertices
+  (high feature-graph valence or sharp turns) → Coons patch interpolation for
+  interior verts → BVH re-project to surface → a few constrained smoothing
+  iterations.
+- **Constrained relax:** interior verts: uniform Laplacian + re-project to BVH;
+  feature verts: slide along their feature polyline only; corner verts: pinned.
+
+## 8. Roadmap
+
+| Version | Contents |
+|---|---|
+| **v0.1 (this scaffold)** | Extension skeleton, settings, panel; Detect Features, Select Issues, CAD Cleanup pass, Start Retopo Session, Finalize Shading. The repair-in-place loop is usable end-to-end. |
+| **v0.2** | Ladder/fan collapse, Trace Feature Loops, bridge fill, seams-from-features, topology report. |
+| **v0.5** | Patch segmentation, Coons patch fill, surface relax, GPU overlays, triangulation preview, export presets. |
+| **v1.0** | Draw-strips modal tool with toolbar integration, fillet rebuild, density equalize, LOD chain, docs + demo assets. |
+
+## 9. Landscape & differentiation
+
+- **RetopoFlow** — excellent, but organic-first; no feature-edge awareness.
+- **Quad Remesher / Remesh modifiers** — automatic, but smears hard-surface
+  features and gives no authoring control.
+- **Mesh Machine / Hard Ops** — hard-surface *modeling*, not CAD ingest/retopo.
+- **CAD-native tools (e.g. InstaLOD, Simplygon)** — pipeline-grade decimation,
+  not artist-grade topology authoring; expensive; outside Blender.
+
+BTopo's niche: **feature-graph-driven, artist-in-the-loop hard-surface retopo,
+native in Blender, spanning quick repair to hero-asset authoring.**
+
+## 10. Open questions / risks
+
+- Performance ceiling of pure Python on multi-million-tri CAD meshes — mitigate
+  with NumPy paths; a compiled core is a last resort.
+- Feature detection robustness on sloppy tessellations (near-threshold fillets) —
+  hysteresis + manual mark/clear tools as escape hatch.
+- Whether Trace Feature Loops should generate geometry or guide curves —
+  prototype both in v0.2.
