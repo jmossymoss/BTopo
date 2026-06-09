@@ -72,6 +72,42 @@ class BTopoSettings(PropertyGroup):
         default=False,
     )
 
+    trace_segment_angle: FloatProperty(
+        name="Segment Angle",
+        description=(
+            "Curvature per segment when resampling traced feature curves; "
+            "lower values keep more segments on curved features "
+            "(30° turns a circle into a 12-gon)"
+        ),
+        subtype='ANGLE',
+        default=math.radians(30.0),
+        min=math.radians(1.0),
+        max=math.radians(120.0),
+    )
+
+    trace_corner_angle: FloatProperty(
+        name="Corner Angle",
+        description=(
+            "Feature curves turning more sharply than this are split at a "
+            "hard corner that always keeps a vertex"
+        ),
+        subtype='ANGLE',
+        default=math.radians(45.0),
+        min=math.radians(5.0),
+        max=math.pi,
+    )
+
+    trace_max_edge: FloatProperty(
+        name="Max Edge Length",
+        description=(
+            "Subdivide traced edges longer than this so long straight rails "
+            "keep enough vertices to fill between (0 = unlimited)"
+        ),
+        subtype='DISTANCE',
+        default=0.0,
+        min=0.0,
+    )
+
 
 def register():
     bpy.utils.register_class(BTopoSettings)

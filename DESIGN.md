@@ -84,7 +84,7 @@ ANALYZE  →  CLEANUP (in-place)  →  RETOPO (author-over)  →  FINALIZE  → 
 | Tool | Description |
 |---|---|
 | **Start Retopo Session** | One click: creates `<name>_retopo` object, configures face-nearest snapping, adds a Shrinkwrap (above-surface) modifier targeting the source, sets in-front + wire display, makes the source unselectable. Mirror modifier if the source is symmetric. |
-| **Trace Feature Loops** *(v0.2)* | Walk the source's feature graph and generate corresponding edge loops in the retopo mesh — the artist gets the structural "cage" for free, then fills between rails. |
+| **Trace Feature Loops** *(prototyped)* | Walk the source's feature graph and generate corresponding edge loops in the retopo mesh — the artist gets the structural "cage" for free, then fills between rails. Implemented in `feature_graph.py` (graph build + adaptive resampling, unit-tested) and `btopo.trace_features`. |
 | **Quad Strip / Bridge Fill** *(v0.2)* | Select two rails, fill with an even quad strip projected to the surface. |
 | **Patch Fill (Coons)** *(v0.5)* | Select a closed boundary of 4 logical sides, fill with a quad grid (transfinite/Coons interpolation), snap to surface. |
 | **Surface Relax** *(v0.5)* | Modal brush: Laplacian relax that re-projects to the reference surface each step, with feature-edge vertices constrained to slide along their feature curve only. |

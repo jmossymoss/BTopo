@@ -18,6 +18,10 @@ source surface. See [DESIGN.md](DESIGN.md) for the full design and roadmap.
   features, tris-to-quads.
 - **Start/End Retopo Session** — one-click author-over setup: snapped,
   shrinkwrapped `_retopo` object with the source locked as reference.
+- **Trace Feature Loops** — walks the source's feature-edge graph and
+  generates the resampled structural cage in the retopo mesh: straight
+  runs collapse to single edges, circles become clean n-gons (segment
+  angle controlled), junctions and hard corners are preserved and welded.
 - **Finalize Shading** — smooth + sharps + keep-sharp Weighted Normal modifier.
 
 ## Requirements

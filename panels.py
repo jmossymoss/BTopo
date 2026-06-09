@@ -66,6 +66,15 @@ class VIEW3D_PT_btopo_retopo(BTopoPanelMixin, Panel):
         col.prop(settings, "shrinkwrap_offset")
         col.prop(settings, "use_mirror")
         layout.operator("btopo.setup_retopo", icon='MOD_SHRINKWRAP')
+
+        layout.separator()
+        col = layout.column(align=True)
+        col.prop(settings, "trace_segment_angle")
+        col.prop(settings, "trace_corner_angle")
+        col.prop(settings, "trace_max_edge")
+        layout.operator("btopo.trace_features", icon='CURVE_DATA')
+
+        layout.separator()
         layout.operator("btopo.end_retopo")
 
 
