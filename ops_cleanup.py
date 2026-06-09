@@ -2,7 +2,7 @@ import bmesh
 import bpy
 from bpy.types import Operator
 
-from .ops_analyze import detect_features
+from .ops_analyze import detect_features, plasticity_face_groups
 
 
 class BTOPO_OT_cleanup_cad(Operator):
@@ -33,8 +33,12 @@ class BTOPO_OT_cleanup_cad(Operator):
         # The dissolve is delimited by sharp edges, so features must be
         # marked first or the pass would eat them.
         if all(e.use_edge_sharp is False for e in obj.data.edges):
+            face_groups = (plasticity_face_groups(obj.data)
+                           if settings.use_plasticity else None)
             detect_features(obj, settings.feature_angle,
-                            mark_seams=settings.mark_seams)
+                            mark_seams=settings.mark_seams,
+                            face_groups=face_groups,
+                            tangent_boundaries=settings.plasticity_tangent)
 
         bm = bmesh.new()
         bm.from_mesh(obj.data)

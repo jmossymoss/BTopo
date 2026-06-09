@@ -22,6 +22,14 @@ source surface. See [DESIGN.md](DESIGN.md) for the full design and roadmap.
   generates the resampled structural cage in the retopo mesh: straight
   runs collapse to single edges, circles become clean n-gons (segment
   angle controlled), junctions and hard corners are preserved and welded.
+- **Bridge Fill** — select two rails (traced loops), get an even quad strip
+  between them: auto-aligned, auto-cut for square quads, projected onto the
+  reference surface.
+- **Plasticity bridge aware** — meshes linked via the
+  [Plasticity Blender bridge](https://doc.plasticity.xyz/blender/introduction-blender-bridge)
+  carry their CAD face groups (`mesh["groups"]`); BTopo uses them for exact
+  feature detection instead of angle guessing, including optional tangent
+  (fillet) boundaries no angle test can find.
 - **Finalize Shading** — smooth + sharps + keep-sharp Weighted Normal modifier.
 
 ## Requirements

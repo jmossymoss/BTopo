@@ -60,12 +60,44 @@ The addon's UI is organized around a pipeline that serves both:
 ANALYZE  →  CLEANUP (in-place)  →  RETOPO (author-over)  →  FINALIZE  →  EXPORT
 ```
 
+## 3b. Plasticity bridge integration (first-class input path)
+
+The primary intake target is [Plasticity](https://www.plasticity.xyz/) via its
+official Blender bridge. The bridge live-links tessellated BREP geometry into
+Blender and — crucially — preserves CAD topology metadata on the mesh:
+
+- `obj["plasticity_id"]` / `obj["plasticity_filename"]` identify linked objects.
+- `mesh["groups"]` holds one `(loop_start, loop_count)` pair per CAD BREP face;
+  every polygon maps to its source CAD face through its loop range.
+- `mesh["face_ids"]` carries the parallel Plasticity face IDs.
+
+BTopo treats this as ground truth wherever it exists:
+
+- **Exact feature detection.** An edge whose two polygons belong to different
+  CAD faces is a real BREP boundary; an edge interior to one CAD face never
+  is. This kills both failure modes of angle-threshold detection: tessellation
+  noise inside curved faces (false positives) and shallow fillet boundaries
+  (false negatives). The angle test still gates which boundaries are *sharp*;
+  an optional **Tangent Boundaries** mode also includes smooth G1 transitions
+  (fillet rails) — invisible to any angle test, but exactly the curves you
+  want to trace and retopologize along.
+- **Refresh-friendly.** The bridge overwrites sharp/seam marks on refacet, so
+  BTopo derives rather than depends on them: re-running Detect Features after
+  a refresh reconstructs the same feature graph from the group data.
+- **Future:** per-CAD-face patch segmentation comes free from `groups`
+  (no flood fill needed); `face_ids` enable stable correspondences across
+  refreshes for persistent per-patch settings.
+
+When no Plasticity data is present (STEP via other importers, OBJ/FBX exports),
+everything falls back to angle-based detection — the rest of the pipeline is
+unchanged.
+
 ## 4. Tool inventory
 
 ### 4.1 Analyze
 | Tool | Description |
 |---|---|
-| **Detect Features** | Build the *feature graph*: mark edges as sharp where face angle exceeds threshold, plus boundaries and non-manifold edges. Optionally mark as UV seams and bevel weights. This is the foundation every other tool consumes. |
+| **Detect Features** | Build the *feature graph*: mark edges as sharp where face angle exceeds threshold, plus boundaries and non-manifold edges. With Plasticity bridge data, detection is exact (see §3b). Optionally mark as UV seams and bevel weights. This is the foundation every other tool consumes. |
 | **Select Issues** | Select triangles, n-gons, poles (interior valence ≠ 4), or non-manifold geometry for QA passes. |
 | **Topology Report** | Counts: tris/quads/ngons, poles, ladder strips, degenerate faces, islands. Shown in the panel after analysis. |
 | **Heatmap Overlays** *(v0.5)* | GPU-drawn viewport overlays: face density, aspect-ratio (ladder) highlighting, curvature. |
@@ -85,7 +117,7 @@ ANALYZE  →  CLEANUP (in-place)  →  RETOPO (author-over)  →  FINALIZE  → 
 |---|---|
 | **Start Retopo Session** | One click: creates `<name>_retopo` object, configures face-nearest snapping, adds a Shrinkwrap (above-surface) modifier targeting the source, sets in-front + wire display, makes the source unselectable. Mirror modifier if the source is symmetric. |
 | **Trace Feature Loops** *(prototyped)* | Walk the source's feature graph and generate corresponding edge loops in the retopo mesh — the artist gets the structural "cage" for free, then fills between rails. Implemented in `feature_graph.py` (graph build + adaptive resampling, unit-tested) and `btopo.trace_features`. |
-| **Quad Strip / Bridge Fill** *(v0.2)* | Select two rails, fill with an even quad strip projected to the surface. |
+| **Quad Strip / Bridge Fill** *(prototyped)* | Select two rails, fill with an even quad strip projected to the surface: rails are auto-paired (reversal/rotation), cut count auto-chosen for square quads, interior verts BVH-projected, faces oriented to the surface. Mismatched vert counts fall back to Blender's bridge. Implemented in `strip_fill.py` + `btopo.bridge_fill`. |
 | **Patch Fill (Coons)** *(v0.5)* | Select a closed boundary of 4 logical sides, fill with a quad grid (transfinite/Coons interpolation), snap to surface. |
 | **Surface Relax** *(v0.5)* | Modal brush: Laplacian relax that re-projects to the reference surface each step, with feature-edge vertices constrained to slide along their feature curve only. |
 | **Draw Strips** *(v1.0)* | Modal tool: draw a stroke on the surface, get a quad strip following it; strokes snap to feature edges magnetically. |

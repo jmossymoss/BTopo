@@ -26,6 +26,26 @@ class BTopoSettings(PropertyGroup):
         default=False,
     )
 
+    use_plasticity: BoolProperty(
+        name="Use Plasticity Face Groups",
+        description=(
+            "When the mesh came through the Plasticity Blender bridge, use "
+            "its CAD face groups for exact feature detection instead of "
+            "relying on the face angle alone"
+        ),
+        default=True,
+    )
+
+    plasticity_tangent: BoolProperty(
+        name="Tangent Boundaries",
+        description=(
+            "Also treat smooth CAD face boundaries (fillet transitions) as "
+            "feature edges — invisible to an angle test, but exactly the "
+            "rails you want to trace and retopologize along"
+        ),
+        default=False,
+    )
+
     merge_distance: FloatProperty(
         name="Merge Distance",
         description=(

@@ -26,6 +26,16 @@ class VIEW3D_PT_btopo_analyze(BTopoPanelMixin, Panel):
         col = layout.column(align=True)
         col.prop(settings, "feature_angle")
         col.prop(settings, "mark_seams")
+
+        obj = context.active_object
+        if obj is not None and obj.type == 'MESH' and "groups" in obj.data:
+            box = layout.box()
+            box.label(text="Plasticity bridge data found", icon='CHECKMARK')
+            box.prop(settings, "use_plasticity")
+            sub = box.row()
+            sub.enabled = settings.use_plasticity
+            sub.prop(settings, "plasticity_tangent")
+
         layout.operator("btopo.detect_features", icon='SHARPCURVE')
 
         layout.separator()
@@ -73,6 +83,7 @@ class VIEW3D_PT_btopo_retopo(BTopoPanelMixin, Panel):
         col.prop(settings, "trace_corner_angle")
         col.prop(settings, "trace_max_edge")
         layout.operator("btopo.trace_features", icon='CURVE_DATA')
+        layout.operator("btopo.bridge_fill", icon='MOD_LATTICE')
 
         layout.separator()
         layout.operator("btopo.end_retopo")
