@@ -12,12 +12,16 @@ def _turn(prev_dir, next_dir):
         return 0.0
 
 
-def split_loop_sides(coords):
+def split_loop_sides(coords, rotate=0):
     """Split a closed boundary loop into four sides at its sharpest corners.
 
     `coords` is the loop in walk order (closure implied). Returns four lists
     of indices into `coords`, in walk order; consecutive sides share their
     corner index and the last side closes back to the first corner.
+
+    `rotate` shifts which corner starts side 0. The corner set is unchanged,
+    but odd rotations swap which sides pair as opposites — the manual fix
+    when the grid runs the wrong way or side counts pair up wrong.
     """
     n = len(coords)
     if n < 4:
@@ -30,6 +34,8 @@ def split_loop_sides(coords):
         turns.append(_turn(prev_dir, next_dir))
 
     corners = sorted(sorted(range(n), key=turns.__getitem__, reverse=True)[:4])
+    rotate %= 4
+    corners = corners[rotate:] + corners[:rotate]
 
     sides = []
     for k in range(4):

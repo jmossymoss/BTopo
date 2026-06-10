@@ -141,6 +141,21 @@ unchanged.
 - **Non-destructive bias:** everything that can be a modifier is a modifier
   (shrinkwrap, weighted normals, triangulate preview, mirror). Destructive
   cleanup operators always report counts and respect undo.
+- **Local adjustment over global re-runs.** Semi-automatic tools are never
+  right everywhere, so every generator must be correctable where it's wrong:
+  1. *Redo panel first* — generators expose their full parameter set as
+     operator properties (trace density/corner angle, bridge cuts/twist/flip,
+     patch grid rotation), so the artist adjusts the result they're looking
+     at; Blender's redo undoes and re-runs, so tweaking never duplicates
+     geometry. Validation errors name the parameter that fixes them.
+  2. *The cage is plain mesh* — per-rail span edits are native
+     subdivide/dissolve: the live shrinkwrap keeps edits glued to the
+     surface, and fills consume whatever the cage says. BTopo deliberately
+     does not own these edits.
+  3. *Planned (v0.5): persistent source correspondence* — traced vertices
+     remember their source feature curve (int attribute) and patches their
+     Plasticity `face_id`, enabling "retrace just this curve denser",
+     per-patch remembered overrides, and cages that survive bridge refreshes.
 - **Conventions:** feature edges = Blender sharp edges (interoperable with
   vanilla tools), retopo objects suffixed `_retopo`, source set unselectable
   during a session rather than hidden (it's the visual reference and bake target).
@@ -200,8 +215,8 @@ Technical choices:
 | Version | Contents |
 |---|---|
 | **v0.1 (this scaffold)** | Extension skeleton, settings, panel; Detect Features, Select Issues, CAD Cleanup pass, Start Retopo Session, Finalize Shading. The repair-in-place loop is usable end-to-end. |
-| **v0.2** | Ladder/fan collapse, Trace Feature Loops, bridge fill, seams-from-features, topology report. |
-| **v0.5** | Patch segmentation, Coons patch fill, surface relax, GPU overlays, triangulation preview, export presets. |
+| **v0.2** | Trace Feature Loops ✓, bridge fill ✓, Coons patch fill ✓ (pulled forward), redo-panel adjustability (twist/flip/rotate/density) ✓, Plasticity face-group detection ✓. Remaining: ladder/fan collapse, seams-from-features, topology report. |
+| **v0.5** | Patch segmentation, surface relax, persistent source correspondence (retrace selected curves, refresh-proof cages, per-patch overrides), GPU overlays, triangulation preview, export presets. |
 | **v1.0** | Draw-strips modal tool with toolbar integration, fillet rebuild, density equalize, LOD chain, docs + demo assets. |
 
 ## 9. Landscape & differentiation

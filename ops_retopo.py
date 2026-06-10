@@ -1,6 +1,8 @@
+import math
+
 import bmesh
 import bpy
-from bpy.props import BoolProperty, IntProperty
+from bpy.props import BoolProperty, FloatProperty, IntProperty
 from bpy.types import Operator
 from mathutils.bvhtree import BVHTree
 from mathutils.kdtree import KDTree
@@ -9,7 +11,8 @@ from .feature_graph import build_feature_curves, resample_curve
 from .ops_analyze import (_bmesh_for_object, _finish_bmesh, detect_features,
                           plasticity_face_groups)
 from .patch_fill import coons_interior, split_loop_sides
-from .strip_fill import align_rail, auto_cuts, grid_rows, order_rails
+from .strip_fill import (adjust_alignment, align_rail, auto_cuts, grid_rows,
+                         order_rails)
 
 
 def session_source(obj):
@@ -147,9 +150,44 @@ class BTOPO_OT_trace_features(Operator):
     )
     bl_options = {'REGISTER', 'UNDO'}
 
+    # Operator copies of the scene trace settings (seeded in invoke), so
+    # the whole trace stays adjustable in the redo panel after running.
+    segment_angle: FloatProperty(
+        name="Segment Angle",
+        description="Curvature per segment when resampling feature curves",
+        subtype='ANGLE',
+        default=math.radians(30.0),
+        min=math.radians(1.0),
+        max=math.radians(120.0),
+    )
+
+    corner_angle: FloatProperty(
+        name="Corner Angle",
+        description="Turns sharper than this always keep a vertex",
+        subtype='ANGLE',
+        default=math.radians(45.0),
+        min=math.radians(5.0),
+        max=math.pi,
+    )
+
+    max_edge: FloatProperty(
+        name="Max Edge Length",
+        description="Subdivide traced edges longer than this (0 = unlimited)",
+        subtype='DISTANCE',
+        default=0.0,
+        min=0.0,
+    )
+
     @classmethod
     def poll(cls, context):
         return session_source(context.active_object) is not None
+
+    def invoke(self, context, event):
+        settings = context.scene.btopo
+        self.segment_angle = settings.trace_segment_angle
+        self.corner_angle = settings.trace_corner_angle
+        self.max_edge = settings.trace_max_edge
+        return self.execute(context)
 
     def execute(self, context):
         retopo = context.active_object
@@ -166,15 +204,15 @@ class BTOPO_OT_trace_features(Operator):
 
         bm_source = bmesh.new()
         bm_source.from_mesh(source.data)
-        curves = build_feature_curves(bm_source, settings.trace_corner_angle)
+        curves = build_feature_curves(bm_source, self.corner_angle)
 
         to_local = retopo.matrix_world.inverted_safe() @ source.matrix_world
         resampled = []
         for verts, is_cycle in curves:
             coords = [v.co for v in verts]
             keep = resample_curve(coords, is_cycle,
-                                  settings.trace_segment_angle,
-                                  settings.trace_max_edge)
+                                  self.segment_angle,
+                                  self.max_edge)
             resampled.append((
                 [verts[i].index for i in keep],
                 [to_local @ coords[i] for i in keep],
@@ -268,6 +306,26 @@ class BTOPO_OT_bridge_fill(Operator):
         max=200,
     )
 
+    flip: BoolProperty(
+        name="Flip",
+        description=(
+            "Reverse the second rail's direction when the automatic pairing "
+            "crosses the strip over"
+        ),
+        default=False,
+    )
+
+    twist: IntProperty(
+        name="Twist",
+        description=(
+            "Rotate the vertex correspondence around closed loops when the "
+            "automatic pairing starts at the wrong vertex"
+        ),
+        default=0,
+        min=-100,
+        max=100,
+    )
+
     @classmethod
     def poll(cls, context):
         obj = context.active_object
@@ -280,6 +338,8 @@ class BTOPO_OT_bridge_fill(Operator):
         row = layout.row()
         row.enabled = not self.use_auto_cuts
         row.prop(self, "cuts")
+        layout.prop(self, "flip")
+        layout.prop(self, "twist")
 
     def execute(self, context):
         retopo = context.active_object
@@ -321,6 +381,8 @@ class BTOPO_OT_bridge_fill(Operator):
         coords_a = [v.co.copy() for v in verts_a]
         coords_b = [v.co.copy() for v in verts_b]
         order = align_rail(coords_a, coords_b, cycle_a)
+        order = adjust_alignment(order, twist=self.twist, flip=self.flip,
+                                 is_cycle=cycle_a)
         verts_b = [verts_b[i] for i in order]
         coords_b = [coords_b[i] for i in order]
 
@@ -377,6 +439,17 @@ class BTOPO_OT_patch_fill(Operator):
     )
     bl_options = {'REGISTER', 'UNDO'}
 
+    rotate: IntProperty(
+        name="Rotate Grid",
+        description=(
+            "Rotate which boundary sides pair as opposites when the grid "
+            "runs the wrong way"
+        ),
+        default=0,
+        min=0,
+        max=3,
+    )
+
     @classmethod
     def poll(cls, context):
         obj = context.active_object
@@ -405,7 +478,8 @@ class BTOPO_OT_patch_fill(Operator):
         loop_verts = rails[0][0]
 
         try:
-            sides = split_loop_sides([v.co for v in loop_verts])
+            sides = split_loop_sides([v.co for v in loop_verts],
+                                     rotate=self.rotate)
         except ValueError as exc:
             self.report({'ERROR'}, str(exc).capitalize())
             return {'CANCELLED'}
@@ -416,8 +490,8 @@ class BTOPO_OT_patch_fill(Operator):
                 {'ERROR'},
                 "Opposite sides need matching vertex counts (got "
                 f"{len(side_a) - 1}/{len(side_c) - 1} and "
-                f"{len(side_b) - 1}/{len(side_d) - 1} edges) — adjust the "
-                "cage or pick different corners",
+                f"{len(side_b) - 1}/{len(side_d) - 1} edges) — try Rotate "
+                "Grid, or adjust the cage with subdivide/dissolve",
             )
             return {'CANCELLED'}
 

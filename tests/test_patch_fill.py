@@ -32,6 +32,14 @@ def test_split_square_finds_the_corners():
     assert sides[3][-1] == sides[0][0]
 
 
+def test_split_rotate_shifts_side_pairing():
+    coords = square_loop(per_side=4)
+    rotated = split_loop_sides(coords, rotate=1)
+    assert [side[0] for side in rotated] == [4, 8, 12, 0], rotated
+    # full rotation cycle returns to the original assignment
+    assert split_loop_sides(coords, rotate=4) == split_loop_sides(coords)
+
+
 def test_split_rejects_tiny_loops():
     try:
         split_loop_sides([Vec(0, 0), Vec(1, 0), Vec(0, 1)])

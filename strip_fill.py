@@ -92,6 +92,24 @@ def align_rail(a_coords, b_coords, is_cycle):
     return min(candidates, key=cost)
 
 
+def adjust_alignment(order, twist=0, flip=False, is_cycle=False):
+    """Manual correction on top of align_rail's automatic pairing.
+
+    `flip` reverses rail B's direction (keeping the start vertex on closed
+    loops, so it purely mirrors the correspondence); `twist` rotates the
+    correspondence around a closed loop by that many vertices.
+    """
+    if flip:
+        if is_cycle:
+            order = [order[0]] + order[1:][::-1]
+        else:
+            order = order[::-1]
+    if is_cycle and twist:
+        t = twist % len(order)
+        order = order[t:] + order[:t]
+    return order
+
+
 def grid_rows(a_coords, b_coords, cuts):
     """Interior rows of coordinates lerped between two equal-length rails.
 

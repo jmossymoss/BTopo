@@ -28,6 +28,11 @@ source surface. See [DESIGN.md](DESIGN.md) for the full design and roadmap.
 - **Patch Fill** — select a closed boundary loop, get a quad grid: the loop
   splits into four sides at its sharpest corners, the interior is Coons
   interpolated and projected onto the reference surface.
+- **Adjustable after the fact** — trace density, bridge cuts/twist/flip and
+  patch grid rotation all live in the F9 redo panel, so a result that came
+  out wrong is fixed in place, not re-run globally. Cage spans are edited
+  with native subdivide/dissolve — the live shrinkwrap keeps everything on
+  the surface.
 - **Plasticity bridge aware** — meshes linked via the
   [Plasticity Blender bridge](https://doc.plasticity.xyz/blender/introduction-blender-bridge)
   carry their CAD face groups (`mesh["groups"]`); BTopo uses them for exact

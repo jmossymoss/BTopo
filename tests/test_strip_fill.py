@@ -6,7 +6,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from strip_fill import align_rail, auto_cuts, grid_rows, order_rails
+from strip_fill import (adjust_alignment, align_rail, auto_cuts, grid_rows,
+                        order_rails)
 from mocks import Vec, polyline
 
 
@@ -78,6 +79,23 @@ def test_auto_cuts_zero_for_close_rails():
     a = [Vec(i, 0) for i in range(5)]
     b = [Vec(i, 1) for i in range(5)]
     assert auto_cuts(a, b, is_cycle=False) == 0
+
+
+def test_adjust_alignment_flip_open_reverses():
+    assert adjust_alignment([0, 1, 2, 3], flip=True) == [3, 2, 1, 0]
+
+
+def test_adjust_alignment_flip_cycle_keeps_start():
+    assert adjust_alignment([2, 3, 0, 1], flip=True, is_cycle=True) == [2, 1, 0, 3]
+
+
+def test_adjust_alignment_twist_rotates_cycle():
+    assert adjust_alignment([0, 1, 2, 3], twist=1, is_cycle=True) == [1, 2, 3, 0]
+    assert adjust_alignment([0, 1, 2, 3], twist=-1, is_cycle=True) == [3, 0, 1, 2]
+
+
+def test_adjust_alignment_twist_ignored_for_open_rails():
+    assert adjust_alignment([0, 1, 2], twist=2) == [0, 1, 2]
 
 
 if __name__ == "__main__":
