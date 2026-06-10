@@ -1,3 +1,5 @@
+import bisect
+
 import bmesh
 import bpy
 from bpy.props import EnumProperty
@@ -22,17 +24,67 @@ def _finish_bmesh(obj, bm, is_edit_mode):
         obj.data.update()
 
 
-def detect_features(obj, angle, mark_seams=False):
+def plasticity_face_groups(mesh):
+    """Map each polygon to its Plasticity CAD face, or None if no bridge data.
+
+    The Plasticity Blender bridge stores one (loop_start, loop_count) pair
+    per CAD BREP face in mesh["groups"]; a polygon belongs to the group
+    whose loop range contains its loop_start. Returns a list with one group
+    ordinal per polygon (-1 where unresolvable).
+    """
+    groups = mesh.get("groups")
+    if groups is None:
+        return None
+    groups = list(groups)
+    if len(groups) < 2 or len(groups) % 2:
+        return None
+    starts = groups[0::2]
+    counts = groups[1::2]
+    order = sorted(range(len(starts)), key=starts.__getitem__)
+    sorted_starts = [starts[i] for i in order]
+
+    face_groups = []
+    for polygon in mesh.polygons:
+        k = bisect.bisect_right(sorted_starts, polygon.loop_start) - 1
+        group = order[k] if k >= 0 else -1
+        if group >= 0 and polygon.loop_start >= starts[group] + counts[group]:
+            group = -1
+        face_groups.append(group)
+    return face_groups
+
+
+def detect_features(obj, angle, mark_seams=False, face_groups=None,
+                    tangent_boundaries=False):
     """Mark feature edges sharp (and optionally as seams).
 
-    An edge is a feature if its faces meet at more than `angle`, or it is a
-    boundary or non-manifold edge. Returns the number of feature edges.
+    Without `face_groups`, an edge is a feature if its faces meet at more
+    than `angle`, or it is a boundary or non-manifold edge.
+
+    With `face_groups` (CAD face per polygon, e.g. from the Plasticity
+    bridge) detection becomes exact: edges interior to one CAD face are
+    never features regardless of tessellation noise, and CAD face
+    boundaries are features when they exceed `angle` — or unconditionally
+    if `tangent_boundaries` is set, which also captures the smooth fillet
+    transitions that an angle test can never see.
+
+    Returns the number of feature edges.
     """
     bm, is_edit = _bmesh_for_object(obj)
+    use_groups = (face_groups is not None
+                  and len(face_groups) == len(bm.faces))
     count = 0
     for edge in bm.edges:
         face_angle = edge.calc_face_angle(None)
-        is_feature = face_angle is None or face_angle > angle
+        if face_angle is None:
+            is_feature = True  # boundary or non-manifold
+        elif use_groups:
+            group_a, group_b = (face_groups[f.index] for f in edge.link_faces)
+            if group_a == group_b and group_a != -1:
+                is_feature = False
+            else:
+                is_feature = tangent_boundaries or face_angle > angle
+        else:
+            is_feature = face_angle > angle
         edge.smooth = not is_feature
         if mark_seams:
             edge.seam = is_feature
@@ -64,12 +116,20 @@ class BTOPO_OT_detect_features(Operator):
 
     def execute(self, context):
         settings = context.scene.btopo
+        obj = context.active_object
+        face_groups = None
+        if settings.use_plasticity:
+            face_groups = plasticity_face_groups(obj.data)
         count = detect_features(
-            context.active_object,
+            obj,
             settings.feature_angle,
             mark_seams=settings.mark_seams,
+            face_groups=face_groups,
+            tangent_boundaries=settings.plasticity_tangent,
         )
-        self.report({'INFO'}, f"Marked {count} feature edges")
+        source = ("Plasticity CAD face groups" if face_groups
+                  else "face angle")
+        self.report({'INFO'}, f"Marked {count} feature edges ({source})")
         return {'FINISHED'}
 
 

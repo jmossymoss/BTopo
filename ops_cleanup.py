@@ -2,7 +2,7 @@ import bmesh
 import bpy
 from bpy.types import Operator
 
-from .ops_analyze import detect_features
+from .ops_analyze import detect_features, plasticity_face_groups
 
 
 class BTOPO_OT_cleanup_cad(Operator):
@@ -29,17 +29,32 @@ class BTOPO_OT_cleanup_cad(Operator):
     def execute(self, context):
         obj = context.active_object
         settings = context.scene.btopo
+        face_groups = (plasticity_face_groups(obj.data)
+                       if settings.use_plasticity else None)
 
         # The dissolve is delimited by sharp edges, so features must be
         # marked first or the pass would eat them.
         if all(e.use_edge_sharp is False for e in obj.data.edges):
             detect_features(obj, settings.feature_angle,
-                            mark_seams=settings.mark_seams)
+                            mark_seams=settings.mark_seams,
+                            face_groups=face_groups,
+                            tangent_boundaries=settings.plasticity_tangent)
 
         bm = bmesh.new()
         bm.from_mesh(obj.data)
         faces_before = len(bm.faces)
         verts_before = len(bm.verts)
+
+        # Bake the Plasticity CAD face ids into a persistent face attribute
+        # before any topology edits: mesh["groups"] maps loop ranges of the
+        # *original* tessellation and goes stale the moment we edit, but a
+        # face layer survives on whatever faces remain. The strip tools use
+        # it to expand selections to whole CAD patches.
+        if (face_groups is not None and len(face_groups) == len(bm.faces)
+                and bm.faces.layers.int.get("btopo_patch") is None):
+            layer = bm.faces.layers.int.new("btopo_patch")
+            for face, group in zip(bm.faces, face_groups):
+                face[layer] = group
 
         if settings.merge_distance > 0.0:
             bmesh.ops.remove_doubles(

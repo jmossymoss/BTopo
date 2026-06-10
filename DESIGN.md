@@ -41,18 +41,29 @@ it to drive both automated cleanup and fast manual authoring.**
 
 BTopo supports two strategies, which can be mixed per-part:
 
-### A. Repair-in-place (fast, for mid/background assets)
-Keep the CAD tessellation as the base and surgically clean it:
-detect features → weld seams → dissolve coplanar ladders → quadify →
-even out density → finalize shading. Cheap, preserves silhouette exactly,
-good enough for many assets.
+### A. Repair-in-place (primary)
+The CAD tessellation's vertices already lie *exactly* on the true surface,
+and its feature edges are exact design intent. Every vertex kept is perfect;
+anything that re-projects can only degrade it. So the primary workflow keeps
+the tessellation as the base and edits topology around it: detect features →
+weld seams → dissolve coplanar ladders → quadify → collapse ladder rungs →
+re-span bevels → finalize shading.
 
-### B. Retopo-over (quality, for hero assets)
-The CAD mesh becomes a read-only *reference surface*. The artist authors a new
-mesh on top of it with surface-snapped tools, guided by the extracted feature
-graph. The CAD mesh doubles as the **bake high-poly**, which is a major
-workflow win: source = highpoly, authored mesh = lowpoly, bake normals between
-them.
+**The in-place invariant: no vertex ever slides.** Tools prefer keeping or
+removing existing vertices (rail resampling, rung dissolving); when a new
+vertex is unavoidable (re-spanning a bevel) it is placed by arc length on an
+existing cross-section polyline — on-surface by construction.
+
+### B. Retopo-over (secondary, for freeform/heavily reworked regions)
+The CAD mesh becomes a read-only *reference surface* and the artist authors a
+new mesh over it, guided by the extracted feature graph. The CAD mesh doubles
+as the **bake high-poly**: source = highpoly, authored mesh = lowpoly.
+
+**Deliberately no live shrinkwrap.** Continuous conformance slides vertices
+and rounds hard corners — unacceptable for hard surface. Generators project
+explicitly (one-shot BVH, at creation time, onto exact geometry); freehand
+edits rely on face-nearest snapping, which only affects vertices being moved.
+The session links retopo → source via an object property, not a modifier.
 
 The addon's UI is organized around a pipeline that serves both:
 
@@ -60,12 +71,44 @@ The addon's UI is organized around a pipeline that serves both:
 ANALYZE  →  CLEANUP (in-place)  →  RETOPO (author-over)  →  FINALIZE  →  EXPORT
 ```
 
+## 3b. Plasticity bridge integration (first-class input path)
+
+The primary intake target is [Plasticity](https://www.plasticity.xyz/) via its
+official Blender bridge. The bridge live-links tessellated BREP geometry into
+Blender and — crucially — preserves CAD topology metadata on the mesh:
+
+- `obj["plasticity_id"]` / `obj["plasticity_filename"]` identify linked objects.
+- `mesh["groups"]` holds one `(loop_start, loop_count)` pair per CAD BREP face;
+  every polygon maps to its source CAD face through its loop range.
+- `mesh["face_ids"]` carries the parallel Plasticity face IDs.
+
+BTopo treats this as ground truth wherever it exists:
+
+- **Exact feature detection.** An edge whose two polygons belong to different
+  CAD faces is a real BREP boundary; an edge interior to one CAD face never
+  is. This kills both failure modes of angle-threshold detection: tessellation
+  noise inside curved faces (false positives) and shallow fillet boundaries
+  (false negatives). The angle test still gates which boundaries are *sharp*;
+  an optional **Tangent Boundaries** mode also includes smooth G1 transitions
+  (fillet rails) — invisible to any angle test, but exactly the curves you
+  want to trace and retopologize along.
+- **Refresh-friendly.** The bridge overwrites sharp/seam marks on refacet, so
+  BTopo derives rather than depends on them: re-running Detect Features after
+  a refresh reconstructs the same feature graph from the group data.
+- **Future:** per-CAD-face patch segmentation comes free from `groups`
+  (no flood fill needed); `face_ids` enable stable correspondences across
+  refreshes for persistent per-patch settings.
+
+When no Plasticity data is present (STEP via other importers, OBJ/FBX exports),
+everything falls back to angle-based detection — the rest of the pipeline is
+unchanged.
+
 ## 4. Tool inventory
 
 ### 4.1 Analyze
 | Tool | Description |
 |---|---|
-| **Detect Features** | Build the *feature graph*: mark edges as sharp where face angle exceeds threshold, plus boundaries and non-manifold edges. Optionally mark as UV seams and bevel weights. This is the foundation every other tool consumes. |
+| **Detect Features** | Build the *feature graph*: mark edges as sharp where face angle exceeds threshold, plus boundaries and non-manifold edges. With Plasticity bridge data, detection is exact (see §3b). Optionally mark as UV seams and bevel weights. This is the foundation every other tool consumes. |
 | **Select Issues** | Select triangles, n-gons, poles (interior valence ≠ 4), or non-manifold geometry for QA passes. |
 | **Topology Report** | Counts: tris/quads/ngons, poles, ladder strips, degenerate faces, islands. Shown in the panel after analysis. |
 | **Heatmap Overlays** *(v0.5)* | GPU-drawn viewport overlays: face density, aspect-ratio (ladder) highlighting, curvature. |
@@ -75,18 +118,18 @@ ANALYZE  →  CLEANUP (in-place)  →  RETOPO (author-over)  →  FINALIZE  → 
 | Tool | Description |
 |---|---|
 | **CAD Cleanup** | One-click pass: weld doubles (CAD patch seams) → limited dissolve *delimited by detected sharp edges* (kills ladders on flat/smooth regions without eating features) → tris-to-quads respecting sharps. Reports before/after counts. |
-| **Collapse Ladders** *(v0.2)* | Targeted: find strips of high-aspect-ratio quads/tris between two feature edges and merge them into single quad spans (un-subdivide along the strip direction). |
+| **Simplify Strip** *(prototyped)* | Collapse ladder rungs along a quad strip: dissolve whole cross-sections, keeping a curvature-driven subset of original vertices (straight fillet → one segment). Rail verts of dropped rungs dissolve out of neighbouring faces too, so ladders stop propagating into adjacent patches. `strip_grid.py` + `btopo.simplify_strip`. |
+| **Set Strip Spans** *(prototyped)* | Rebuild a bevel/fillet strip at a chosen span count: rails stay fixed (neighbours unaffected), new verts placed by arc length on existing cross-sections. Matching counts across adjacent bevels makes loops continuous. Selections expand to whole CAD patches via the `btopo_patch` face attribute baked by CAD Cleanup. `btopo.set_strip_spans`. |
 | **Collapse Fans** *(v0.2)* | Detect fan vertices on planar caps; replace fan with grid fill. |
-| **Rebuild Fillets** *(v1.0)* | Detect over-tessellated cylindrical fillet strips; rebuild at a user-set segment count, preserving the tangent rails. |
 | **Density Equalize** *(v1.0)* | Planar-decimate / subdivide per segmented patch to hit a target edge length. |
 
 ### 4.3 Retopo (author-over)
 | Tool | Description |
 |---|---|
 | **Start Retopo Session** | One click: creates `<name>_retopo` object, configures face-nearest snapping, adds a Shrinkwrap (above-surface) modifier targeting the source, sets in-front + wire display, makes the source unselectable. Mirror modifier if the source is symmetric. |
-| **Trace Feature Loops** *(v0.2)* | Walk the source's feature graph and generate corresponding edge loops in the retopo mesh — the artist gets the structural "cage" for free, then fills between rails. |
-| **Quad Strip / Bridge Fill** *(v0.2)* | Select two rails, fill with an even quad strip projected to the surface. |
-| **Patch Fill (Coons)** *(v0.5)* | Select a closed boundary of 4 logical sides, fill with a quad grid (transfinite/Coons interpolation), snap to surface. |
+| **Trace Feature Loops** *(prototyped)* | Walk the source's feature graph and generate corresponding edge loops in the retopo mesh — the artist gets the structural "cage" for free, then fills between rails. Implemented in `feature_graph.py` (graph build + adaptive resampling, unit-tested) and `btopo.trace_features`. |
+| **Quad Strip / Bridge Fill** *(prototyped)* | Select two rails, fill with an even quad strip projected to the surface: rails are auto-paired (reversal/rotation), cut count auto-chosen for square quads, interior verts BVH-projected, faces oriented to the surface. Mismatched vert counts fall back to Blender's bridge. Implemented in `strip_fill.py` + `btopo.bridge_fill`. |
+| **Patch Fill (Coons)** *(prototyped)* | Select a closed boundary loop; it is split into 4 sides at its sharpest corners, filled with a quad grid via bilinearly blended Coons interpolation, and BVH-projected to the surface. Opposite sides must have matching counts. Implemented in `patch_fill.py` + `btopo.patch_fill`. |
 | **Surface Relax** *(v0.5)* | Modal brush: Laplacian relax that re-projects to the reference surface each step, with feature-edge vertices constrained to slide along their feature curve only. |
 | **Draw Strips** *(v1.0)* | Modal tool: draw a stroke on the surface, get a quad strip following it; strokes snap to feature edges magnetically. |
 
@@ -109,6 +152,21 @@ ANALYZE  →  CLEANUP (in-place)  →  RETOPO (author-over)  →  FINALIZE  → 
 - **Non-destructive bias:** everything that can be a modifier is a modifier
   (shrinkwrap, weighted normals, triangulate preview, mirror). Destructive
   cleanup operators always report counts and respect undo.
+- **Local adjustment over global re-runs.** Semi-automatic tools are never
+  right everywhere, so every generator must be correctable where it's wrong:
+  1. *Redo panel first* — generators expose their full parameter set as
+     operator properties (trace density/corner angle, bridge cuts/twist/flip,
+     patch grid rotation), so the artist adjusts the result they're looking
+     at; Blender's redo undoes and re-runs, so tweaking never duplicates
+     geometry. Validation errors name the parameter that fixes them.
+  2. *The cage is plain mesh* — per-rail span edits are native
+     subdivide/dissolve: the live shrinkwrap keeps edits glued to the
+     surface, and fills consume whatever the cage says. BTopo deliberately
+     does not own these edits.
+  3. *Planned (v0.5): persistent source correspondence* — traced vertices
+     remember their source feature curve (int attribute) and patches their
+     Plasticity `face_id`, enabling "retrace just this curve denser",
+     per-patch remembered overrides, and cages that survive bridge refreshes.
 - **Conventions:** feature edges = Blender sharp edges (interoperable with
   vanilla tools), retopo objects suffixed `_retopo`, source set unselectable
   during a session rather than hidden (it's the visual reference and bake target).
@@ -168,8 +226,8 @@ Technical choices:
 | Version | Contents |
 |---|---|
 | **v0.1 (this scaffold)** | Extension skeleton, settings, panel; Detect Features, Select Issues, CAD Cleanup pass, Start Retopo Session, Finalize Shading. The repair-in-place loop is usable end-to-end. |
-| **v0.2** | Ladder/fan collapse, Trace Feature Loops, bridge fill, seams-from-features, topology report. |
-| **v0.5** | Patch segmentation, Coons patch fill, surface relax, GPU overlays, triangulation preview, export presets. |
+| **v0.2** | Trace Feature Loops ✓, bridge fill ✓, Coons patch fill ✓ (pulled forward), redo-panel adjustability (twist/flip/rotate/density) ✓, Plasticity face-group detection ✓. Remaining: ladder/fan collapse, seams-from-features, topology report. |
+| **v0.5** | Patch segmentation, surface relax, persistent source correspondence (retrace selected curves, refresh-proof cages, per-patch overrides), GPU overlays, triangulation preview, export presets. |
 | **v1.0** | Draw-strips modal tool with toolbar integration, fillet rebuild, density equalize, LOD chain, docs + demo assets. |
 
 ## 9. Landscape & differentiation

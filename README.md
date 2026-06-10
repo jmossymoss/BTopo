@@ -15,9 +15,41 @@ source surface. See [DESIGN.md](DESIGN.md) for the full design and roadmap.
 - **Detect Features** — mark feature edges sharp (angle + boundary + non-manifold).
 - **Select Issues** — QA selection of tris, n-gons, poles, non-manifold geometry.
 - **CAD Cleanup** — weld seam doubles, dissolve ladders without crossing
-  features, tris-to-quads.
-- **Start/End Retopo Session** — one-click author-over setup: snapped,
-  shrinkwrapped `_retopo` object with the source locked as reference.
+  features, tris-to-quads; bakes Plasticity CAD face ids into a persistent
+  face attribute for the strip tools.
+- **Simplify Strip** — collapse ladder rungs along a bevel/fillet strip,
+  keeping a curvature-driven subset of the original vertices. Nothing
+  slides: kept verts are untouched, and dropped rungs dissolve out of
+  neighbouring patches too.
+- **Set Strip Spans** — rebuild a bevel at a chosen span count with rails
+  fixed and new verts placed by arc length on existing cross-sections
+  (on-surface by construction). Matching spans across bevels is what makes
+  loops continuous around the part.
+- **Start/End Retopo Session** — one-click author-over setup: a
+  face-nearest-snapped `_retopo` object with the source locked as
+  reference. Deliberately no shrinkwrap modifier — continuous conformance
+  slides verts and rounds hard corners; generators project one-shot
+  instead.
+- **Trace Feature Loops** — walks the source's feature-edge graph and
+  generates the resampled structural cage in the retopo mesh: straight
+  runs collapse to single edges, circles become clean n-gons (segment
+  angle controlled), junctions and hard corners are preserved and welded.
+- **Bridge Fill** — select two rails (traced loops), get an even quad strip
+  between them: auto-aligned, auto-cut for square quads, projected onto the
+  reference surface.
+- **Patch Fill** — select a closed boundary loop, get a quad grid: the loop
+  splits into four sides at its sharpest corners, the interior is Coons
+  interpolated and projected onto the reference surface.
+- **Adjustable after the fact** — trace density, bridge cuts/twist/flip and
+  patch grid rotation all live in the F9 redo panel, so a result that came
+  out wrong is fixed in place, not re-run globally. Cage spans are edited
+  with native subdivide/dissolve — the live shrinkwrap keeps everything on
+  the surface.
+- **Plasticity bridge aware** — meshes linked via the
+  [Plasticity Blender bridge](https://doc.plasticity.xyz/blender/introduction-blender-bridge)
+  carry their CAD face groups (`mesh["groups"]`); BTopo uses them for exact
+  feature detection instead of angle guessing, including optional tangent
+  (fillet) boundaries no angle test can find.
 - **Finalize Shading** — smooth + sharps + keep-sharp Weighted Normal modifier.
 
 ## Requirements
