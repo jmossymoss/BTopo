@@ -63,6 +63,11 @@ class VIEW3D_PT_btopo_cleanup(BTopoPanelMixin, Panel):
         col.prop(settings, "quadify")
         layout.operator("btopo.cleanup_cad", icon='MOD_DECIM')
 
+        layout.separator()
+        layout.label(text="Strips (Edit Mode):")
+        layout.operator("btopo.simplify_strip", icon='MOD_DECIM')
+        layout.operator("btopo.set_strip_spans", icon='MOD_ARRAY')
+
 
 class VIEW3D_PT_btopo_retopo(BTopoPanelMixin, Panel):
     bl_label = "3. Retopo (Author-Over)"
@@ -72,10 +77,8 @@ class VIEW3D_PT_btopo_retopo(BTopoPanelMixin, Panel):
         layout = self.layout
         settings = context.scene.btopo
 
-        col = layout.column(align=True)
-        col.prop(settings, "shrinkwrap_offset")
-        col.prop(settings, "use_mirror")
-        layout.operator("btopo.setup_retopo", icon='MOD_SHRINKWRAP')
+        layout.prop(settings, "use_mirror")
+        layout.operator("btopo.setup_retopo", icon='SNAP_FACE')
 
         layout.separator()
         col = layout.column(align=True)

@@ -41,9 +41,9 @@ class BTopoSettings(PropertyGroup):
         description=(
             "Also treat smooth CAD face boundaries (fillet transitions) as "
             "feature edges — invisible to an angle test, but exactly the "
-            "rails you want to trace and retopologize along"
+            "rails the in-place strip tools and tracing work along"
         ),
-        default=False,
+        default=True,
     )
 
     merge_distance: FloatProperty(
@@ -75,15 +75,6 @@ class BTopoSettings(PropertyGroup):
         name="Tris to Quads",
         description="Join triangles into quads after dissolving, respecting feature edges",
         default=True,
-    )
-
-    shrinkwrap_offset: FloatProperty(
-        name="Surface Offset",
-        description="Distance the retopo mesh floats above the reference surface",
-        subtype='DISTANCE',
-        default=0.002,
-        min=0.0,
-        precision=4,
     )
 
     use_mirror: BoolProperty(

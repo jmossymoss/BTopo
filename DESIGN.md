@@ -41,18 +41,29 @@ it to drive both automated cleanup and fast manual authoring.**
 
 BTopo supports two strategies, which can be mixed per-part:
 
-### A. Repair-in-place (fast, for mid/background assets)
-Keep the CAD tessellation as the base and surgically clean it:
-detect features → weld seams → dissolve coplanar ladders → quadify →
-even out density → finalize shading. Cheap, preserves silhouette exactly,
-good enough for many assets.
+### A. Repair-in-place (primary)
+The CAD tessellation's vertices already lie *exactly* on the true surface,
+and its feature edges are exact design intent. Every vertex kept is perfect;
+anything that re-projects can only degrade it. So the primary workflow keeps
+the tessellation as the base and edits topology around it: detect features →
+weld seams → dissolve coplanar ladders → quadify → collapse ladder rungs →
+re-span bevels → finalize shading.
 
-### B. Retopo-over (quality, for hero assets)
-The CAD mesh becomes a read-only *reference surface*. The artist authors a new
-mesh on top of it with surface-snapped tools, guided by the extracted feature
-graph. The CAD mesh doubles as the **bake high-poly**, which is a major
-workflow win: source = highpoly, authored mesh = lowpoly, bake normals between
-them.
+**The in-place invariant: no vertex ever slides.** Tools prefer keeping or
+removing existing vertices (rail resampling, rung dissolving); when a new
+vertex is unavoidable (re-spanning a bevel) it is placed by arc length on an
+existing cross-section polyline — on-surface by construction.
+
+### B. Retopo-over (secondary, for freeform/heavily reworked regions)
+The CAD mesh becomes a read-only *reference surface* and the artist authors a
+new mesh over it, guided by the extracted feature graph. The CAD mesh doubles
+as the **bake high-poly**: source = highpoly, authored mesh = lowpoly.
+
+**Deliberately no live shrinkwrap.** Continuous conformance slides vertices
+and rounds hard corners — unacceptable for hard surface. Generators project
+explicitly (one-shot BVH, at creation time, onto exact geometry); freehand
+edits rely on face-nearest snapping, which only affects vertices being moved.
+The session links retopo → source via an object property, not a modifier.
 
 The addon's UI is organized around a pipeline that serves both:
 
@@ -107,9 +118,9 @@ unchanged.
 | Tool | Description |
 |---|---|
 | **CAD Cleanup** | One-click pass: weld doubles (CAD patch seams) → limited dissolve *delimited by detected sharp edges* (kills ladders on flat/smooth regions without eating features) → tris-to-quads respecting sharps. Reports before/after counts. |
-| **Collapse Ladders** *(v0.2)* | Targeted: find strips of high-aspect-ratio quads/tris between two feature edges and merge them into single quad spans (un-subdivide along the strip direction). |
+| **Simplify Strip** *(prototyped)* | Collapse ladder rungs along a quad strip: dissolve whole cross-sections, keeping a curvature-driven subset of original vertices (straight fillet → one segment). Rail verts of dropped rungs dissolve out of neighbouring faces too, so ladders stop propagating into adjacent patches. `strip_grid.py` + `btopo.simplify_strip`. |
+| **Set Strip Spans** *(prototyped)* | Rebuild a bevel/fillet strip at a chosen span count: rails stay fixed (neighbours unaffected), new verts placed by arc length on existing cross-sections. Matching counts across adjacent bevels makes loops continuous. Selections expand to whole CAD patches via the `btopo_patch` face attribute baked by CAD Cleanup. `btopo.set_strip_spans`. |
 | **Collapse Fans** *(v0.2)* | Detect fan vertices on planar caps; replace fan with grid fill. |
-| **Rebuild Fillets** *(v1.0)* | Detect over-tessellated cylindrical fillet strips; rebuild at a user-set segment count, preserving the tangent rails. |
 | **Density Equalize** *(v1.0)* | Planar-decimate / subdivide per segmented patch to hit a target edge length. |
 
 ### 4.3 Retopo (author-over)

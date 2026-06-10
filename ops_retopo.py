@@ -16,9 +16,15 @@ from .strip_fill import (adjust_alignment, align_rail, auto_cuts, grid_rows,
 
 
 def session_source(obj):
-    """The session's reference surface: the object's shrinkwrap target."""
+    """The session's reference surface for a retopo object."""
     if obj is None or obj.type != 'MESH':
         return None
+    name = obj.get("btopo_source")
+    if name:
+        source = bpy.data.objects.get(name)
+        if source is not None and source.type == 'MESH':
+            return source
+    # Legacy sessions linked source via a shrinkwrap modifier.
     for modifier in obj.modifiers:
         if (modifier.type == 'SHRINKWRAP' and modifier.target is not None
                 and modifier.target.type == 'MESH'):
@@ -66,17 +72,22 @@ def _orient_and_select(faces, project, normal_to_retopo):
 class BTOPO_OT_setup_retopo(Operator):
     """Start a retopo-over session for the active CAD mesh.
 
-    Creates an empty `<name>_retopo` mesh, configures surface snapping, adds
-    a Shrinkwrap modifier targeting the source, and sets up display so the
-    new topology reads clearly over the reference. The source object stays
-    visible but unselectable — it is the visual reference and, later, the
-    bake high-poly.
+    Creates an empty `<name>_retopo` mesh linked to its reference surface,
+    configures face-nearest snapping, and sets up display so the new
+    topology reads clearly over the reference. The source stays visible
+    but unselectable — it is the visual reference and, later, the bake
+    high-poly.
+
+    Deliberately no shrinkwrap modifier: continuous conformance slides
+    vertices and rounds hard corners. Generators project explicitly (one
+    shot, at creation time); freehand edits rely on snapping, which only
+    affects vertices being moved.
     """
 
     bl_idname = "btopo.setup_retopo"
     bl_label = "Start Retopo Session"
     bl_description = (
-        "Create a snapped, shrinkwrapped retopo object over the active mesh"
+        "Create a surface-snapped retopo object over the active mesh"
     )
     bl_options = {'REGISTER', 'UNDO'}
 
@@ -101,11 +112,7 @@ class BTOPO_OT_setup_retopo(Operator):
             mirror = retopo.modifiers.new("BTopo Mirror", 'MIRROR')
             mirror.use_clip = True
 
-        shrinkwrap = retopo.modifiers.new("BTopo Shrinkwrap", 'SHRINKWRAP')
-        shrinkwrap.target = source
-        shrinkwrap.wrap_method = 'NEAREST_SURFACEPOINT'
-        shrinkwrap.wrap_mode = 'ABOVE_SURFACE'
-        shrinkwrap.offset = settings.shrinkwrap_offset
+        retopo["btopo_source"] = source.name
 
         retopo.show_in_front = True
         retopo.show_wire = True
