@@ -84,6 +84,7 @@ class VIEW3D_PT_btopo_retopo(BTopoPanelMixin, Panel):
         col.prop(settings, "trace_max_edge")
         layout.operator("btopo.trace_features", icon='CURVE_DATA')
         layout.operator("btopo.bridge_fill", icon='MOD_LATTICE')
+        layout.operator("btopo.patch_fill", icon='MESH_GRID')
 
         layout.separator()
         layout.operator("btopo.end_retopo")

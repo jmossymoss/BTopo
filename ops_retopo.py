@@ -8,6 +8,7 @@ from mathutils.kdtree import KDTree
 from .feature_graph import build_feature_curves, resample_curve
 from .ops_analyze import (_bmesh_for_object, _finish_bmesh, detect_features,
                           plasticity_face_groups)
+from .patch_fill import coons_interior, split_loop_sides
 from .strip_fill import align_rail, auto_cuts, grid_rows, order_rails
 
 
@@ -20,6 +21,43 @@ def session_source(obj):
                 and modifier.target.type == 'MESH'):
             return modifier.target
     return None
+
+
+def _surface_projection(context, retopo, source):
+    """Projection onto the reference surface, in retopo local space.
+
+    Returns (project, normal_to_retopo): `project(co)` maps a retopo-local
+    coordinate to (surface point, surface normal in source space) — or
+    (co, None) if the BVH lookup fails — and `normal_to_retopo` brings
+    those normals into retopo space for comparisons.
+    """
+    depsgraph = context.evaluated_depsgraph_get()
+    bvh = BVHTree.FromObject(source, depsgraph)
+    to_source = source.matrix_world.inverted_safe() @ retopo.matrix_world
+    from_source = to_source.inverted_safe()
+    normal_to_retopo = from_source.to_3x3()
+
+    def project(co):
+        location, normal, _index, _dist = bvh.find_nearest(to_source @ co)
+        if location is None:
+            return co, None
+        return from_source @ location, normal
+
+    return project, normal_to_retopo
+
+
+def _orient_and_select(faces, project, normal_to_retopo):
+    """Flip new faces that disagree with the reference surface, select them."""
+    for face in faces:
+        face.normal_update()
+        _location, normal = project(face.calc_center_median())
+        if normal is not None and face.normal.dot(normal_to_retopo @ normal) < 0:
+            face.normal_flip()
+        face.select = True
+        for vert in face.verts:
+            vert.select = True
+        for edge in face.edges:
+            edge.select = True
 
 
 class BTOPO_OT_setup_retopo(Operator):
@@ -289,17 +327,7 @@ class BTOPO_OT_bridge_fill(Operator):
         cuts = (auto_cuts(coords_a, coords_b, cycle_a)
                 if self.use_auto_cuts else self.cuts)
 
-        depsgraph = context.evaluated_depsgraph_get()
-        bvh = BVHTree.FromObject(source, depsgraph)
-        to_source = source.matrix_world.inverted_safe() @ retopo.matrix_world
-        from_source = to_source.inverted_safe()
-        normal_to_retopo = from_source.to_3x3()
-
-        def project(co):
-            location, normal, _index, _dist = bvh.find_nearest(to_source @ co)
-            if location is None:
-                return co, None
-            return from_source @ location, normal
+        project, normal_to_retopo = _surface_projection(context, retopo, source)
 
         vert_rows = [verts_a]
         for row in grid_rows(coords_a, coords_b, cuts):
@@ -323,19 +351,120 @@ class BTOPO_OT_bridge_fill(Operator):
                 face.smooth = True
                 new_faces.append(face)
 
-        # Orient the new faces with the reference surface so the strip
-        # doesn't come out inside-out.
-        for face in new_faces:
-            face.normal_update()
-            _location, normal = project(face.calc_center_median())
-            if normal is not None and face.normal.dot(normal_to_retopo @ normal) < 0:
-                face.normal_flip()
-            face.select = True
-
+        _orient_and_select(new_faces, project, normal_to_retopo)
         bm.select_flush_mode()
         bmesh.update_edit_mesh(retopo.data)
         self.report({'INFO'},
                     f"Bridged with {len(new_faces)} quads ({cuts} cuts)")
+        return {'FINISHED'}
+
+
+class BTOPO_OT_patch_fill(Operator):
+    """Fill a four-sided region with a surface-projected quad grid.
+
+    Select the closed boundary loop of the patch (typically traced feature
+    edges). The loop is split into four sides at its sharpest corners,
+    the interior is interpolated as a Coons patch, and every new vertex is
+    projected onto the reference surface. Opposite sides must have matching
+    vertex counts for a pure quad grid.
+    """
+
+    bl_idname = "btopo.patch_fill"
+    bl_label = "Patch Fill"
+    bl_description = (
+        "Fill the selected four-sided boundary loop with quads projected "
+        "onto the reference surface"
+    )
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return (obj is not None and obj.mode == 'EDIT'
+                and session_source(obj) is not None)
+
+    def execute(self, context):
+        retopo = context.active_object
+        source = session_source(retopo)
+        bm = bmesh.from_edit_mesh(retopo.data)
+
+        selected = [e for e in bm.edges if e.select]
+        if not selected:
+            self.report({'ERROR'}, "Select the closed boundary of a patch")
+            return {'CANCELLED'}
+        try:
+            rails = order_rails(selected)
+        except ValueError as exc:
+            self.report({'ERROR'}, str(exc).capitalize())
+            return {'CANCELLED'}
+        if len(rails) != 1 or not rails[0][1]:
+            self.report({'ERROR'},
+                        "Select exactly one closed boundary loop "
+                        f"(found {len(rails)} run(s))")
+            return {'CANCELLED'}
+        loop_verts = rails[0][0]
+
+        try:
+            sides = split_loop_sides([v.co for v in loop_verts])
+        except ValueError as exc:
+            self.report({'ERROR'}, str(exc).capitalize())
+            return {'CANCELLED'}
+        side_verts = [[loop_verts[i] for i in side] for side in sides]
+        side_a, side_b, side_c, side_d = side_verts
+        if (len(side_a) != len(side_c) or len(side_b) != len(side_d)):
+            self.report(
+                {'ERROR'},
+                "Opposite sides need matching vertex counts (got "
+                f"{len(side_a) - 1}/{len(side_c) - 1} and "
+                f"{len(side_b) - 1}/{len(side_d) - 1} edges) — adjust the "
+                "cage or pick different corners",
+            )
+            return {'CANCELLED'}
+
+        # Boundary rows in Coons orientation: bottom/top in the same
+        # direction, left/right in the same direction (see coons_interior).
+        bottom = side_a
+        right = side_b
+        top = list(reversed(side_c))
+        left = list(reversed(side_d))
+        m = len(bottom) - 1
+        n = len(left) - 1
+
+        project, normal_to_retopo = _surface_projection(context, retopo, source)
+        interior = coons_interior(
+            [v.co.copy() for v in bottom], [v.co.copy() for v in right],
+            [v.co.copy() for v in top], [v.co.copy() for v in left])
+
+        grid = [[None] * (n + 1) for _ in range(m + 1)]
+        for i in range(m + 1):
+            grid[i][0] = bottom[i]
+            grid[i][n] = top[i]
+        for j in range(n + 1):
+            grid[0][j] = left[j]
+            grid[m][j] = right[j]
+        for j in range(1, n):
+            for i in range(1, m):
+                grid[i][j] = bm.verts.new(project(interior[j - 1][i - 1])[0])
+
+        for elem in (*bm.verts, *bm.edges, *bm.faces):
+            elem.select = False
+
+        new_faces = []
+        for i in range(m):
+            for j in range(n):
+                corners = (grid[i][j], grid[i + 1][j],
+                           grid[i + 1][j + 1], grid[i][j + 1])
+                if len(set(corners)) < 4 or bm.faces.get(corners):
+                    continue
+                face = bm.faces.new(corners)
+                face.smooth = True
+                new_faces.append(face)
+
+        _orient_and_select(new_faces, project, normal_to_retopo)
+        bm.select_flush_mode()
+        bmesh.update_edit_mesh(retopo.data)
+        self.report({'INFO'},
+                    f"Filled {m}×{n} patch with {len(new_faces)} quads")
         return {'FINISHED'}
 
 
@@ -361,6 +490,7 @@ _classes = (
     BTOPO_OT_setup_retopo,
     BTOPO_OT_trace_features,
     BTOPO_OT_bridge_fill,
+    BTOPO_OT_patch_fill,
     BTOPO_OT_end_retopo,
 )
 

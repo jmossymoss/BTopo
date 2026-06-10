@@ -25,6 +25,9 @@ source surface. See [DESIGN.md](DESIGN.md) for the full design and roadmap.
 - **Bridge Fill** — select two rails (traced loops), get an even quad strip
   between them: auto-aligned, auto-cut for square quads, projected onto the
   reference surface.
+- **Patch Fill** — select a closed boundary loop, get a quad grid: the loop
+  splits into four sides at its sharpest corners, the interior is Coons
+  interpolated and projected onto the reference surface.
 - **Plasticity bridge aware** — meshes linked via the
   [Plasticity Blender bridge](https://doc.plasticity.xyz/blender/introduction-blender-bridge)
   carry their CAD face groups (`mesh["groups"]`); BTopo uses them for exact
