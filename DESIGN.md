@@ -49,10 +49,14 @@ the tessellation as the base and edits topology around it: detect features →
 weld seams → dissolve coplanar ladders → quadify → collapse ladder rungs →
 re-span bevels → finalize shading.
 
-**The in-place invariant: no vertex ever slides.** Tools prefer keeping or
-removing existing vertices (rail resampling, rung dissolving); when a new
-vertex is unavoidable (re-spanning a bevel) it is placed by arc length on an
-existing cross-section polyline — on-surface by construction.
+**The in-place invariant: no vertex ever leaves the surface.** By default
+tools only keep or remove existing vertices (rail resampling, rung
+dissolving). When the artist asks for redistribution (even rail spacing,
+relaxed patch interiors) or new vertices are unavoidable, positions come
+from splines/interpolants fitted through original geometry and are then
+re-projected onto a snapshot of the exact source surface — vertices may
+slide *along* the surface, never off it. Shrinkwrap-style continuous
+conformance remains banned.
 
 #### The rails-then-patches pipeline
 
@@ -229,6 +233,18 @@ can't comfortably say "this patch, fix it". The planned interaction layer:
 
 This cannot be developed blind — GPU drawing and modal event handling need a
 live viewport — so it is built in short iterations against artist feedback.
+
+**Prior art studied: "AV: ResampleMesh"** (GPL-3.0-or-later, © 2024 Anton
+Vashkevich; user-supplied copy). Its core Resample flow: keep a bmesh backup,
+let the artist scroll to add/remove loops live (modal + HUD), fit splines
+(Akima/Catmull-Rom/cubic) through the *original* vertex sequences as the
+curvature model, move the resampled vertices onto the spline, reconnect.
+Adopted into BTopo: centripetal Catmull-Rom rail redistribution (`splines.py`,
+reimplemented dependency-free) with the BTopo twist that targets re-project
+onto the exact source surface — something spline-only tools cannot do.
+To adopt next: the modal scroll-driven density UX (backup → scroll → re-run)
+for Simplify Rails and Rebuild Patch, and its HUD/draw utilities as reference
+for the Patch Painter overlay.
 
 ## 6. Architecture
 

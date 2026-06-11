@@ -19,7 +19,9 @@ source surface. See [DESIGN.md](DESIGN.md) for the full design and roadmap.
   face attribute for the strip tools.
 - **Simplify Rails** — resample all feature curves in place by dissolving
   vertices; works on any topology (ladders, T-junctions, fans). The rails
-  define the spans every rebuild uses.
+  define the spans every rebuild uses. Optional *Even (Spline)* spacing
+  slides survivors to even arc length along a Catmull-Rom fitted through
+  the original rail, re-projected onto the surface.
 - **Rebuild Patch** — discard a patch's interior (any topology) and
   resynthesise an even, controllable quad grid between its rails — Coons
   interpolation projected onto a snapshot of the original surface. Handles

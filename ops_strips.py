@@ -23,8 +23,11 @@ from mathutils.bvhtree import BVHTree
 
 from .feature_graph import build_feature_curves, resample_curve
 from .patch_fill import _turn, coons_interior, split_loop_sides
+from .relax import relax_grid
+from .splines import catmull_rom_even
 from .strip_fill import align_rail, auto_cuts, grid_rows
-from .strip_grid import recover_grid, region_boundary_cycles
+from .strip_grid import (recover_grid, region_boundary_cycles,
+                         resample_polyline_count)
 
 PATCH_LAYER = "btopo_patch"
 
@@ -114,6 +117,21 @@ class BTOPO_OT_simplify_rails(Operator):
         default=True,
     )
 
+    spacing: EnumProperty(
+        name="Spacing",
+        description="Where the surviving rail vertices end up",
+        items=(
+            ('KEEP', "Keep Originals",
+             "Only remove vertices; survivors stay exactly where the CAD "
+             "tessellation put them"),
+            ('EVEN', "Even (Spline)",
+             "Redistribute survivors at even arc length along a spline "
+             "fitted through the original rail, re-projected onto the "
+             "surface — vertices slide along the surface, never off it"),
+        ),
+        default='KEEP',
+    )
+
     @classmethod
     def poll(cls, context):
         obj = context.active_object
@@ -144,17 +162,24 @@ class BTOPO_OT_simplify_rails(Operator):
             return {'CANCELLED'}
 
         victims = {}
+        curve_data = []
         for verts, is_cycle in curves:
-            coords = [v.co for v in verts]
-            keep = set(resample_curve(coords, is_cycle,
-                                      self.segment_angle, self.max_edge))
+            coords = [v.co.copy() for v in verts]
+            keep = resample_curve(coords, is_cycle,
+                                  self.segment_angle, self.max_edge)
+            curve_data.append((verts, coords, keep, is_cycle))
+            keep_set = set(keep)
             for i, vert in enumerate(verts):
-                if i not in keep:
+                if i not in keep_set:
                     victims[vert] = None
         victims = list(victims)
-        if not victims:
+        if not victims and self.spacing == 'KEEP':
             self.report({'INFO'}, "Nothing to simplify at this density")
             return {'FINISHED'}
+
+        # Snapshot the surface before any edits so redistributed vertices
+        # can be glued back onto the exact original geometry.
+        bvh = BVHTree.FromBMesh(bm) if self.spacing == 'EVEN' else None
 
         # First merge away whatever hangs off the dropped vertices (rungs,
         # fans): smooth interior edges only, so rails are never crossed.
@@ -171,13 +196,49 @@ class BTOPO_OT_simplify_rails(Operator):
         if removable:
             bmesh.ops.dissolve_verts(bm, verts=removable)
 
+        if bvh is not None:
+            self._redistribute(curve_data, bvh)
+
         bmesh.update_edit_mesh(obj.data)
         skipped = len(victims) - len(removable)
         message = f"Removed {len(removable)} rail vertices"
         if skipped:
             message += f" ({skipped} structural vertices kept)"
+        if bvh is not None:
+            message += ", even spacing"
         self.report({'INFO'}, message)
         return {'FINISHED'}
+
+    def _redistribute(self, curve_data, bvh):
+        """Slide surviving rail vertices to even arc length, on-surface.
+
+        Targets come from a centripetal Catmull-Rom through the *original*
+        rail (so curvature is honoured, not chord-cut) and are re-projected
+        onto the surface snapshot. Corners, junctions and cycle anchors
+        never move.
+        """
+        for verts, coords, keep, is_cycle in curve_data:
+            kept = [verts[i] for i in keep]
+            if is_cycle:
+                if len(kept) < 3:
+                    continue
+                anchor = keep[0]
+                rotated = [coords[(anchor + k) % len(coords)]
+                           for k in range(len(coords))]
+                rotated.append(coords[anchor])
+                targets = catmull_rom_even(rotated, len(kept))
+                movable = range(1, len(kept))
+            else:
+                if len(kept) < 3:
+                    continue
+                targets = catmull_rom_even(coords, len(kept) - 1)
+                movable = range(1, len(kept) - 1)
+            for k in movable:
+                vert = kept[k]
+                if not vert.is_valid:
+                    continue
+                location, _normal, _index, _dist = bvh.find_nearest(targets[k])
+                vert.co = location if location is not None else targets[k]
 
 
 class BTOPO_OT_rebuild_patch(Operator):
@@ -254,6 +315,18 @@ class BTOPO_OT_rebuild_patch(Operator):
             "patch ids baked by Detect Features / CAD Cleanup)"
         ),
         default=True,
+    )
+
+    smooth_iterations: IntProperty(
+        name="Smooth Iterations",
+        description=(
+            "Projected relaxation passes on the new interior: evens the "
+            "quad distribution along curvature while staying glued to the "
+            "original surface (rails never move)"
+        ),
+        default=5,
+        min=0,
+        max=100,
     )
 
     @classmethod
@@ -385,6 +458,7 @@ class BTOPO_OT_rebuild_patch(Operator):
             for i in range(1, m):
                 grid[i][j] = bm.verts.new(_project(bvh, interior[j - 1][i - 1]))
 
+        self._relax_interior(grid, wrap=False, bvh=bvh)
         return _grid_faces(bm, grid, wrap=False)
 
     def _rebuild_ring(self, bm, bvh, cycles):
@@ -407,7 +481,19 @@ class BTOPO_OT_rebuild_patch(Operator):
 
         # Transpose into the station-major grid the face builder expects.
         grid = [[row[i] for row in vert_rows] for i in range(len(rail_a))]
+        self._relax_interior(grid, wrap=True, bvh=bvh)
         return _grid_faces(bm, grid, wrap=True)
+
+    def _relax_interior(self, grid, wrap, bvh):
+        if self.smooth_iterations <= 0 or len(grid[0]) < 3:
+            return
+        coords = [[v.co.copy() for v in row] for row in grid]
+        relaxed = relax_grid(coords, wrap, self.smooth_iterations,
+                             project=lambda co: _project(bvh, co))
+        i_range = range(len(grid)) if wrap else range(1, len(grid) - 1)
+        for i in i_range:
+            for j in range(1, len(grid[0]) - 1):
+                grid[i][j].co = relaxed[i][j]
 
 
 def _project(bvh, co):
@@ -475,8 +561,6 @@ class BTOPO_OT_set_strip_spans(Operator):
         return obj is not None and obj.type == 'MESH' and obj.mode == 'EDIT'
 
     def execute(self, context):
-        from .strip_grid import resample_polyline_count
-
         obj = context.active_object
         bm = bmesh.from_edit_mesh(obj.data)
 
