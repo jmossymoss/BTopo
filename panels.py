@@ -64,9 +64,14 @@ class VIEW3D_PT_btopo_cleanup(BTopoPanelMixin, Panel):
         layout.operator("btopo.cleanup_cad", icon='MOD_DECIM')
 
         layout.separator()
-        layout.label(text="Strips (Edit Mode):")
-        layout.operator("btopo.simplify_strip", icon='MOD_DECIM')
-        layout.operator("btopo.set_strip_spans", icon='MOD_ARRAY')
+        layout.label(text="In-Place Rebuild (Edit Mode):")
+        col = layout.column(align=True)
+        col.operator("btopo.simplify_rails", icon='CURVE_DATA')
+        col.operator("btopo.rebuild_patch", icon='MESH_GRID')
+        layout.label(text="Regular strips (fast path):")
+        col = layout.column(align=True)
+        col.operator("btopo.simplify_strip", icon='MOD_DECIM')
+        col.operator("btopo.set_strip_spans", icon='MOD_ARRAY')
 
 
 class VIEW3D_PT_btopo_retopo(BTopoPanelMixin, Panel):

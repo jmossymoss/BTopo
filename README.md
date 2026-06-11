@@ -17,14 +17,16 @@ source surface. See [DESIGN.md](DESIGN.md) for the full design and roadmap.
 - **CAD Cleanup** — weld seam doubles, dissolve ladders without crossing
   features, tris-to-quads; bakes Plasticity CAD face ids into a persistent
   face attribute for the strip tools.
-- **Simplify Strip** — collapse ladder rungs along a bevel/fillet strip,
-  keeping a curvature-driven subset of the original vertices. Nothing
-  slides: kept verts are untouched, and dropped rungs dissolve out of
-  neighbouring patches too.
-- **Set Strip Spans** — rebuild a bevel at a chosen span count with rails
-  fixed and new verts placed by arc length on existing cross-sections
-  (on-surface by construction). Matching spans across bevels is what makes
-  loops continuous around the part.
+- **Simplify Rails** — resample all feature curves in place by dissolving
+  vertices; works on any topology (ladders, T-junctions, fans). The rails
+  define the spans every rebuild uses.
+- **Rebuild Patch** — discard a patch's interior (any topology) and
+  resynthesise an even, controllable quad grid between its rails — Coons
+  interpolation projected onto a snapshot of the original surface. Handles
+  four-sided patches and two-loop rings; resolves rail mismatches by
+  dissolving the denser or conformally subdividing the sparser rail.
+- **Simplify Strip / Set Strip Spans** — fast paths for strips that are
+  already regular quad grids.
 - **Start/End Retopo Session** — one-click author-over setup: a
   face-nearest-snapped `_retopo` object with the source locked as
   reference. Deliberately no shrinkwrap modifier — continuous conformance

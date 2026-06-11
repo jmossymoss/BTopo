@@ -5,7 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from strip_grid import recover_grid, resample_polyline_count
+from strip_grid import recover_grid, region_boundary_cycles, resample_polyline_count
 from mocks import Vec, Vert
 
 
@@ -73,6 +73,29 @@ def test_rejects_l_shaped_region():
     except ValueError:
         return
     raise AssertionError("expected ValueError for an L-shaped region")
+
+
+def test_boundary_cycles_open_region():
+    _, faces = make_grid(3, 3)
+    cycles = region_boundary_cycles(faces)
+    assert len(cycles) == 1 and len(cycles[0]) == 8, cycles
+
+
+def test_boundary_cycles_ring_region():
+    _, faces = make_grid(6, 2, closed=True)
+    cycles = region_boundary_cycles(faces)
+    assert len(cycles) == 2
+    assert sorted(len(c) for c in cycles) == [6, 6]
+
+
+def test_boundary_cycles_mixed_polygons():
+    # an ngon next to a quad still yields one clean boundary loop
+    a = [Vert(Vec(x, 0), x) for x in range(3)]
+    b = [Vert(Vec(x, 1), 10 + x) for x in range(3)]
+    faces = [(a[0], a[1], b[1], b[0]),
+             (a[1], a[2], b[2], b[1], )]
+    cycles = region_boundary_cycles(faces)
+    assert len(cycles) == 1 and len(cycles[0]) == 6, cycles
 
 
 def test_resample_polyline_by_arc_length():

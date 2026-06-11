@@ -53,6 +53,24 @@ def plasticity_face_groups(mesh):
     return face_groups
 
 
+def bake_patch_attribute(mesh, face_groups):
+    """Persist CAD face ids as a face attribute that survives topology edits.
+
+    mesh["groups"] maps loop ranges of the original tessellation and goes
+    stale the moment topology changes; the baked attribute rides along on
+    whatever faces remain. Returns True if baked.
+    """
+    if face_groups is None or len(face_groups) != len(mesh.polygons):
+        return False
+    attribute = mesh.attributes.get("btopo_patch")
+    if attribute is None:
+        attribute = mesh.attributes.new("btopo_patch", 'INT', 'FACE')
+    elif attribute.domain != 'FACE' or attribute.data_type != 'INT':
+        return False
+    attribute.data.foreach_set("value", face_groups)
+    return True
+
+
 def detect_features(obj, angle, mark_seams=False, face_groups=None,
                     tangent_boundaries=False):
     """Mark feature edges sharp (and optionally as seams).
@@ -120,6 +138,8 @@ class BTOPO_OT_detect_features(Operator):
         face_groups = None
         if settings.use_plasticity:
             face_groups = plasticity_face_groups(obj.data)
+            if obj.mode == 'OBJECT':
+                bake_patch_attribute(obj.data, face_groups)
         count = detect_features(
             obj,
             settings.feature_angle,

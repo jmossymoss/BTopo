@@ -54,6 +54,41 @@ removing existing vertices (rail resampling, rung dissolving); when a new
 vertex is unavoidable (re-spanning a bevel) it is placed by arc length on an
 existing cross-section polyline — on-surface by construction.
 
+#### The rails-then-patches pipeline
+
+Real CAD tessellations are not regular grids: density transitions,
+T-junction-style splits, fans and mixed polygon sizes are the norm. Dissolve
+heuristics cannot repair them. The general in-place path is therefore:
+
+1. **Simplify Rails** — resample every feature curve in place by dissolving
+   vertices (curvature-driven; corners/junctions always kept). The rails
+   *are* the spans: their density decides every patch's resolution.
+2. **Rebuild Patch** — per CAD patch, discard the interior wholesale and
+   resynthesise it between the rails: transfinite (Coons) interpolation for
+   even u/v divisions, every new vertex projected onto a BVH snapshot of the
+   original surface. Equivalent to fitting a NURBS patch to the boundary,
+   without the fitting fragility — the tessellation *is* the exact surface,
+   so projecting onto it is as accurate as the source data allows.
+
+#### Density-mismatch resolution
+
+Mismatched vertex counts where patches meet are the norm, not the edge case,
+and every mismatch must have a resolution path:
+
+- **Shared rails first.** Opposite sides of a patch are usually *the same
+  feature curve sampled twice* (both sides of a bevel). Simplify Rails
+  resamples each curve once, globally, so patches on either side agree by
+  construction.
+- **Dissolve denser** (Rebuild Patch default): remove the flattest excess
+  vertices from the denser rail. Lossy in the right direction for game
+  meshes; never moves a vertex.
+- **Subdivide sparser**: insert vertices into the sparser rail's longest
+  edges. Conforming — the neighbouring face gains the vertex too, so the
+  mesh stays watertight; new verts lie on the existing rail polyline.
+- **Transition topology** *(planned)*: when counts *should* differ (a dense
+  bevel meeting a sparse plane), insert quad reducers (diamonds / 3-5 pole
+  pairs) inside the patch instead of forcing rail counts to agree.
+
 ### B. Retopo-over (secondary, for freeform/heavily reworked regions)
 The CAD mesh becomes a read-only *reference surface* and the artist authors a
 new mesh over it, guided by the extracted feature graph. The CAD mesh doubles
@@ -117,7 +152,9 @@ unchanged.
 ### 4.2 Cleanup (repair-in-place)
 | Tool | Description |
 |---|---|
-| **CAD Cleanup** | One-click pass: weld doubles (CAD patch seams) → limited dissolve *delimited by detected sharp edges* (kills ladders on flat/smooth regions without eating features) → tris-to-quads respecting sharps. Reports before/after counts. |
+| **CAD Cleanup** | Weld/quadify pre-pass: weld doubles → limited dissolve delimited by sharps → tris-to-quads. Honest scope: heuristic dissolve cannot repair curvature ladders or T-junction density transitions — that is Simplify Rails + Rebuild Patch's job. Also bakes `btopo_patch` ids. |
+| **Simplify Rails** *(prototyped)* | Resample all feature curves in place by dissolving vertices (rungs/fans hanging off dropped verts merge into adjacent faces first, so any topology works). Rails define the spans everything else builds between. `btopo.simplify_rails`. |
+| **Rebuild Patch** *(prototyped)* | Discard a patch's interior (any topology) and resynthesise an even quad grid between its rails: Coons interior projected onto a surface snapshot. Handles 1-loop (grid) and 2-loop (ring) patches; resolves rail mismatches by dissolve-denser / subdivide-sparser. `btopo.rebuild_patch`. |
 | **Simplify Strip** *(prototyped)* | Collapse ladder rungs along a quad strip: dissolve whole cross-sections, keeping a curvature-driven subset of original vertices (straight fillet → one segment). Rail verts of dropped rungs dissolve out of neighbouring faces too, so ladders stop propagating into adjacent patches. `strip_grid.py` + `btopo.simplify_strip`. |
 | **Set Strip Spans** *(prototyped)* | Rebuild a bevel/fillet strip at a chosen span count: rails stay fixed (neighbours unaffected), new verts placed by arc length on existing cross-sections. Matching counts across adjacent bevels makes loops continuous. Selections expand to whole CAD patches via the `btopo_patch` face attribute baked by CAD Cleanup. `btopo.set_strip_spans`. |
 | **Collapse Fans** *(v0.2)* | Detect fan vertices on planar caps; replace fan with grid fill. |
@@ -170,6 +207,28 @@ unchanged.
 - **Conventions:** feature edges = Blender sharp edges (interoperable with
   vanilla tools), retopo objects suffixed `_retopo`, source set unselectable
   during a session rather than hidden (it's the visual reference and bake target).
+
+## 5b. Patch Painter — overlay-driven interaction (next milestone)
+
+Smoke testing showed the selection model is the bottleneck: with the
+reference locked (or topology too messy to box-select cleanly), the artist
+can't comfortably say "this patch, fix it". The planned interaction layer:
+
+- **GPU overlay** (`gpu` module draw handler, POST_VIEW): patches colour-coded
+  by status — *irregular density* (candidates for rebuild), *rebuilt*,
+  *failed last attempt*, *hovered/selected*. Batches built per `btopo_patch`
+  id and cached; invalidated on depsgraph updates.
+- **Pick on locked objects**: a modal operator raycasts the scene under the
+  cursor (`scene.ray_cast` works regardless of selectability), resolves the
+  hit face's patch id, and highlights it. Click selects the patch, drag
+  paints multiple, double-click runs Rebuild Patch with the last-used
+  settings. The locked reference stops being a wall between the artist and
+  the geometry.
+- **Status source of truth** is mesh data (the `btopo_patch` attribute plus a
+  status int attribute), so overlays survive reloads and stay scriptable.
+
+This cannot be developed blind — GPU drawing and modal event handling need a
+live viewport — so it is built in short iterations against artist feedback.
 
 ## 6. Architecture
 

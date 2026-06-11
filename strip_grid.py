@@ -12,6 +12,24 @@ unit-tested outside Blender (see tests/test_strip_grid.py).
 from collections import defaultdict
 
 
+def region_boundary_cycles(faces_verts):
+    """Ordered boundary loop(s) of a face region, any polygon sizes.
+
+    Returns a list of vertex lists, one per boundary loop, each in walk
+    order with implied closure. Raises ValueError if the region has no
+    boundary (it covers a closed surface) or the boundary is irregular.
+    """
+    edge_faces = defaultdict(list)
+    for face in faces_verts:
+        n = len(face)
+        for k in range(n):
+            edge_faces[frozenset((face[k], face[(k + 1) % n]))].append(face)
+    boundary = [e for e, fs in edge_faces.items() if len(fs) == 1]
+    if not boundary:
+        raise ValueError("region has no boundary — it covers a closed surface")
+    return _boundary_cycles(boundary)
+
+
 def recover_grid(faces_verts, flip=False):
     """Recover the vert grid of a regular quad strip region.
 
