@@ -30,10 +30,10 @@ source surface. See [DESIGN.md](DESIGN.md) for the full design and roadmap.
 - **Simplify Strip / Set Strip Spans** — fast paths for strips that are
   already regular quad grids.
 - **Start/End Retopo Session** — one-click author-over setup: a
-  face-nearest-snapped `_retopo` object with the source locked as
-  reference. Deliberately no shrinkwrap modifier — continuous conformance
-  slides verts and rounds hard corners; generators project one-shot
-  instead.
+  face-nearest-snapped `_retopo` object that starts populated (the feature
+  cage is auto-traced on entry), with optional reference locking.
+  Deliberately no shrinkwrap modifier — continuous conformance slides
+  verts and rounds hard corners; generators project one-shot instead.
 - **Trace Feature Loops** — walks the source's feature-edge graph and
   generates the resampled structural cage in the retopo mesh: straight
   runs collapse to single edges, circles become clean n-gons (segment

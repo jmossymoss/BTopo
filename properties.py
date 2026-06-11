@@ -83,6 +83,25 @@ class BTopoSettings(PropertyGroup):
         default=False,
     )
 
+    auto_trace: BoolProperty(
+        name="Trace on Start",
+        description=(
+            "Trace the feature cage immediately when the session starts, so "
+            "the retopo mesh begins populated instead of empty"
+        ),
+        default=True,
+    )
+
+    lock_source: BoolProperty(
+        name="Lock Reference",
+        description=(
+            "Make the reference object unselectable in Object Mode for the "
+            "duration of the session (Edit Mode already isolates clicks to "
+            "the retopo mesh). End Retopo Session unlocks it"
+        ),
+        default=False,
+    )
+
     trace_segment_angle: FloatProperty(
         name="Segment Angle",
         description=(

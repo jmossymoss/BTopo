@@ -82,7 +82,10 @@ class VIEW3D_PT_btopo_retopo(BTopoPanelMixin, Panel):
         layout = self.layout
         settings = context.scene.btopo
 
-        layout.prop(settings, "use_mirror")
+        col = layout.column(align=True)
+        col.prop(settings, "use_mirror")
+        col.prop(settings, "auto_trace")
+        col.prop(settings, "lock_source")
         layout.operator("btopo.setup_retopo", icon='SNAP_FACE')
 
         layout.separator()

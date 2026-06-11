@@ -119,7 +119,8 @@ class BTOPO_OT_setup_retopo(Operator):
         retopo.show_all_edges = True
         retopo.color = (0.2, 0.7, 1.0, 1.0)
 
-        source.hide_select = True
+        if settings.lock_source:
+            source.hide_select = True
 
         tool_settings = context.tool_settings
         tool_settings.use_snap = True
@@ -135,7 +136,15 @@ class BTOPO_OT_setup_retopo(Operator):
         context.view_layer.objects.active = retopo
         bpy.ops.object.mode_set(mode='EDIT')
 
-        self.report({'INFO'}, f"Retopo session started: {retopo.name}")
+        if settings.auto_trace:
+            bpy.ops.btopo.trace_features('INVOKE_DEFAULT')
+            self.report({'INFO'},
+                        f"Retopo session started: {retopo.name} — cage "
+                        "traced, fill between the rails")
+        else:
+            self.report({'INFO'},
+                        f"Retopo session started: {retopo.name} — run Trace "
+                        "Feature Loops to generate the cage")
         return {'FINISHED'}
 
 
